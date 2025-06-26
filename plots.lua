@@ -638,7 +638,17 @@ function tab_plot(model)
    local box = bounding_box(model:page())
    local has_viewport = not box:isEmpty()
    local same, nxt = line_counter()
-   local d = ipeui.Dialog(get_dialog_parent(model), "Plot tabulated data")
+   local d = ipeui.Dialog(get_dialog_parent(model), "Data Plot")
+
+   -- get symbol names from current stylesheet(s)
+   local sheets = model.doc:sheets()
+   local symbolnames = sheets:allNames("symbol")
+   local marknames = {}
+   for j=1,#symbolnames do
+      if string.find(symbolnames[j], "mark/") then
+         marknames[#marknames+1] = symbolnames[j]
+      end
+   end
    
    local dirname 
    local curname
@@ -675,7 +685,7 @@ function tab_plot(model)
       local fltr
       local fname = extract_name()
       if fname == "..." then fname = "" end
-      n, fltr = ipeui.fileDialog(model.ui:win(), "open", "Choose data file",
+      n, fltr = ipeui.fileDialog(model.ui:win(), "open", "Choose data file:",
                                  {"CSV (*.csv)", "*.csv", "ALL (*)", "*"},
                                  extract_dir(), fname, 1)
       if n then curname = n end
@@ -691,7 +701,7 @@ function tab_plot(model)
    d:add("separator", "input", {}, same(), 2, 1, 1)
    d:add("label3", "label", {label="comment label ="}, same(), 3, 1, 1)
    d:add("comment", "input", {}, same(), 4, 1, 1)
-   d:add("label4", "label", {label="Choose which columns should be used."}, 
+   d:add("label4", "label", {label="Choose which columns should be used:"}, 
          nxt(), 1, 1, 4)
    d:add("label5", "label", {label="x="}, nxt(), 1)
    d:add("xeq", "input", {}, same(), 2, 1, 3)
@@ -711,7 +721,10 @@ function tab_plot(model)
    end
    -- d:add("label12", "label", {label="number of points"}, nxt(), 1, 1, 1)
    -- d:add("points", "input", {}, same(), 2, 1, 1)
-   d:add("cubic", "checkbox", {label="use cubic splines"}, nxt(), 1, 1, 1)
+   d:add("lines", "checkbox", {label="connect points"}, nxt(), 1, 1, 1)
+   d:add("cubic", "checkbox", {label="use cubic splines"}, same(), 2, 1, 1)
+   d:add("symbols", "checkbox", {label="use symbols"}, same(), 3, 1, 1)
+   d:add("markcombo", "combo", marknames, same(), 4, 1, 1)
    d:addButton("ok", "&Ok", "accept")
    d:addButton("cancel", "&Cancel", "reject")
    d:setStretch("column", 2, 1)
@@ -734,11 +747,10 @@ function tab_plot(model)
       if y0store then d:set("yfrom",y0store) end
       if y1store then d:set("yto",y1store) end
    end
-   -- if t0store then d:set("tfrom",t0store) end
-   -- if t1store then d:set("tto",t1store) end
-   -- if not pointsstore then pointsstore = 100 end
-   -- d:set("points",pointsstore)
    if hascubicstore then d:set("cubic",cubicstore) else d:set("cubic",true) end
+   if haslinesstore then d:set("lines",linesstore) else d:set("lines", true) end
+   if hassymbolsstore then d:set("symbols",symbolsstore) else d:set("symbols", false) end
+   if symnamestore then d:set("markcombo",symnamestore) end
    if not d:execute() then return end
    local filenm = d:get("filename")
    filestore = curname
@@ -756,11 +768,13 @@ function tab_plot(model)
       y0store = d:get("yfrom")
       y1store = d:get("yto")
    end
-   -- t0store = d:get("tfrom")
-   -- t1store = d:get("tto")
-   -- pointsstore = d:get("points")
    cubicstore = d:get("cubic")
    hascubicstore = true
+   linesstore = d:get("lines")
+   haslinesstore = true
+   symbolsstore = d:get("symbols")
+   hassymbolsstore = true
+   symnamesstore = d:get("markcombo")
 
    -- real coordinates
    local x0, x1, y0, y1
@@ -852,14 +866,11 @@ function tab_plot(model)
       return
    end
 
-   local graph = ipe.Path(model.attributes, { curve } )
+   local graphs = {}
 
-   -- we need at least 4 points for cubic splines
-   if i < 4 then cubicstore = false end
-
-   -- if want cubic interpolation
-   local spline= { type="curve", closed=false }
-   if cubicstore==true then
+   -- connect points by cubic splines (at least 4 points for spline)
+   if linesstore and cubicstore and i > 3 then
+      local spline= { type="curve", closed=false }
       local p0x,p1x,p2x,p3x=cubicfit(1,i,i,xs)
       local p0y,p1y,p2y,p3y=cubicfit(1,i,i,ys)
       for j=1,i-1 do
@@ -869,10 +880,20 @@ function tab_plot(model)
 	      trans*ipe.Vector(p2x[j], p2y[j]),
 	      trans*ipe.Vector(p3x[j], p3y[j]) }
       end
-      graph = ipe.Path(model.attributes, { spline } )
+      graphs[#graphs + 1] = ipe.Path(model.attributes, { spline } )
+   elseif linesstore then
+      graphs[#graphs + 1] = ipe.Path(model.attributes, { curve } )
    end
 
-   model:creation("create graph", graph)
+   if symbolsstore==true then
+      for j=1,i do
+         graphs[#graphs + 1] = ipe.Reference(model.attributes, marknames[symnamesstore], trans*(ipe.Vector(xs[j], ys[j])))
+      end
+   end
+
+   graph = ipe.Group(graphs)
+   model:creation("create plot", graph)
+
 end
 
 -- coordinate system
